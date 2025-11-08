@@ -271,6 +271,346 @@ example.com 是可以访问的，但响应时间 156.2ms 确实有点慢。让�
 - 🔍 **可检索**: 支持文本搜索和分析
 - 📊 **长期记录**: 适合性能分析和问题排查
 
+## 🎯 完整工作流程示例
+
+### 场景：用户请求 "帮我检查 github.com 的网络状况"
+
+#### 1. 用户输入
+```
+You: 帮我检查 github.com 的网络状况
+```
+
+#### 2. OpenAI 收到的工具定义
+
+`_get_tools_schema()` 将我们的 4 个工具转换为 OpenAI 格式：
+
+```json
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "ping",
+      "description": "Ping a host to check network connectivity...",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "host": {"type": "string", "description": "The hostname..."},
+          "count": {"type": "integer", "default": 4},
+          "timeout": {"type": "integer", "default": 3}
+        },
+        "required": ["host"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "dns_lookup",
+      "description": "Perform DNS lookup to resolve domain names...",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "domain": {"type": "string", "description": "The domain name..."},
+          "record_type": {"type": "string", "default": "A", "enum": ["A", "AAAA", "MX", "TXT"]}
+        },
+        "required": ["domain"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "traceroute",
+      "description": "Trace the network path to a host...",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "host": {"type": "string", "description": "The hostname..."},
+          "max_hops": {"type": "integer", "default": 15}
+        },
+        "required": ["host"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "network_info",
+      "description": "Get local network information...",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  }
+]
+```
+
+#### 3. LLM 的分析和决策
+
+LLM 看到"检查网络状况"，决定使用多个工具：
+
+**第一次工具调用**：
+```json
+{
+  "tool_calls": [
+    {
+      "function": {
+        "name": "ping",
+        "arguments": "{\"host\": \"github.com\", \"count\": 4}"
+      }
+    }
+  ]
+}
+```
+
+#### 4. 我们的代码执行
+
+```python
+# 在 _handle_tool_calls() 中
+tool_name = "ping"
+tool_args = {"host": "github.com", "count": 4}
+
+# 调用工具
+result = self._execute_tool("ping", {"host": "github.com", "count": 4})
+```
+
+**实际执行的 ping 命令**：
+```bash
+ping -c 4 github.com
+```
+
+**工具返回结果**：
+```
+✅ github.com is reachable - 4 packets transmitted, 4 packets received, 0.0% packet loss, round-trip min/avg/max = 45.2/47.8/52.1 ms
+```
+
+#### 5. LLM 继续分析
+
+看到 ping 成功但想获取更多信息，决定进行 DNS 查询：
+
+**第二次工具调用**：
+```json
+{
+  "tool_calls": [
+    {
+      "function": {
+        "name": "dns_lookup",
+        "arguments": "{\"domain\": \"github.com\"}"
+      }
+    }
+  ]
+}
+```
+
+#### 6. DNS 查询执行
+
+```python
+result = self._execute_tool("dns_lookup", {"domain": "github.com"})
+```
+
+**实际执行的 DNS 命令**：
+```bash
+dig github.com A
+```
+
+**DNS 查询结果**：
+```
+DNS lookup for github.com (A record):
+github.com.           300     IN      A       140.82.112.4
+```
+
+#### 7. LLM 进行路径追踪
+
+为了提供完整的网络分析，决定进行 traceroute：
+
+**第三次工具调用**：
+```json
+{
+  "tool_calls": [
+    {
+      "function": {
+        "name": "traceroute",
+        "arguments": "{\"host\": \"github.com\", \"max_hops\": 15}"
+      }
+    }
+  ]
+}
+```
+
+#### 8. 最终回复
+
+LLM 综合所有工具结果，给出智能分析：
+
+```
+Agent: 根据网络测试结果，github.com 的连接状况如下：
+
+🌐 **连通性状态**: ✅ 完全正常
+- Ping 测试: 4/4 包成功，0% 丢包率
+- 延迟: 平均 47.8ms，表现优秀
+
+🔍 **DNS 解析**: ✅ 正常
+- github.com → 140.82.112.4
+- DNS 响应速度: 2ms
+
+📊 **网络路径**: ✅ 稳定
+- 经过 8 个网络节点到达 github.com
+- 路径清晰，无明显瓶颈
+
+💡 **总结**: github.com 从您当前网络访问完全正常，连接速度和稳定性都很好！
+```
+
+#### 9. 工具调用日志
+
+整个过程中，每个工具调用都会生成详细日志：
+
+```
+2025-11-08 22:15:10,123 - INFO - 🚀 CALLING TOOL: ping
+2025-11-08 22:15:10,123 - INFO - 📋 Arguments: {'host': 'github.com', 'count': 4}
+2025-11-08 22:15:12,456 - INFO - ✅ TOOL COMPLETED: ping
+2025-11-08 22:15:12,456 - INFO - ⏱️  Execution time: 2.33s
+2025-11-08 22:15:12,456 - INFO - 📊 Result: ✅ github.com is reachable - 4 packets transmitted...
+2025-11-08 22:15:12,456 - INFO - ------------------------------------------------------------
+2025-11-08 22:15:12,457 - INFO - 🚀 CALLING TOOL: dns_lookup
+2025-11-08 22:15:12,457 - INFO - 📋 Arguments: {'domain': 'github.com'}
+2025-11-08 22:15:12,478 - INFO - ✅ TOOL COMPLETED: dns_lookup
+2025-11-08 22:15:12,478 - INFO - ⏱️  Execution time: 0.02s
+...
+```
+
+### 🎯 关键点
+
+1. **工具定义转换**: `_get_tools_schema()` 将 Python 类转换为 JSON Schema
+2. **LLM 智能选择**: 根据用户需求选择合适的工具组合
+3. **参数智能匹配**: LLM 自动提取和构造工具参数
+4. **递归执行**: 支持多轮工具调用直到获得完整答案
+5. **结果综合**: LLM 将多个工具结果整合成有用的分析
+
+这就是整个工具调用机制的工作原理！🚀
+
+## 🔍 工具调用机制详解
+
+### LLM 如何获得工具执行结果
+
+工具调用结果通过上下文传递给 LLM，关键机制如下：
+
+#### 1. 工具执行
+```python
+# 在 _handle_tool_calls() 方法中
+for tool_call in message.tool_calls:
+    tool_name = tool_call.function.name
+    tool_args = json.loads(tool_call.function.arguments)
+
+    # 🔥 执行工具并获得结果
+    tool_result = self._execute_tool(tool_name, tool_args)
+    # 例如：tool_result = "✅ github.com is reachable - 4 packets transmitted..."
+```
+
+#### 2. 结果传递给 LLM
+```python
+# 🔥 将工具结果添加到对话上下文
+self.context.append({
+    "role": "tool",                    # 特殊角色：工具结果
+    "tool_call_id": tool_call.id,      # 关联到具体的工具调用
+    "name": tool_name,                  # 工具名称
+    "content": tool_result             # 🔥 工具的实际执行结果
+})
+```
+
+#### 3. LLM 接收结果
+```python
+# 在下一次 API 调用中，LLM 会看到完整的上下文
+response = self.client.chat.completions.create(
+    model=self.model,
+    messages=self.context,  # 🔥 包含了工具结果的完整对话历史
+    tools=self._get_tools_schema(),
+    tool_choice="auto"
+)
+```
+
+### 完整数据流示例
+
+#### OpenAI API 返回工具调用请求
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "我来检查 github.com 的连接",
+      "tool_calls": [{
+        "id": "call_abc123",
+        "type": "function",
+        "function": {
+          "name": "ping",
+          "arguments": "{\"host\": \"github.com\"}"
+        }
+      }]
+    }
+  }]
+}
+```
+
+#### 发送给 LLM 的完整上下文
+```json
+[
+  {"role": "system", "content": "你是一个网络诊断专家..."},
+  {"role": "user", "content": "帮我检查 github.com 的网络状况"},
+  {"role": "assistant", "content": "我来检查连接", "tool_calls": [...]},
+  {
+    "role": "tool",                                    # 🔥 LLM 看到工具结果
+    "tool_call_id": "call_abc123",
+    "name": "ping",
+    "content": "✅ github.com is reachable - 4 packets transmitted, 4 packets received, 0.0% packet loss, round-trip min/avg/max = 45.2/47.8/52.1 ms"
+  }
+]
+```
+
+### 关键机制说明
+
+#### OpenAI 的特殊消息角色
+- **`"assistant"`**: LLM 决定调用工具的消息
+- **`"tool"`**: 🔥 工具执行结果的消息
+
+#### 上下文管理
+```python
+# 工具调用前
+self.context.append({"role": "user", "content": "检查 github.com"})
+
+# LLM 决定调用工具后
+self.context.append({"role": "assistant", "tool_calls": [...]})
+
+# 工具执行完成后
+self.context.append({"role": "tool", "content": tool_result})
+
+# 下一次 API 调用时，LLM 看到完整历史
+```
+
+#### 递归工具调用
+```python
+# 在 process() 方法中的循环
+while True:
+    response = self.client.chat.completions.create(
+        model=self.model,
+        messages=self.context,  # 包含之前的工具结果
+        tools=self._get_tools_schema(),
+        tool_choice="auto"
+    )
+
+    # 如果有工具调用，执行并添加结果到上下文
+    if self._handle_tool_calls(response):
+        continue  # 继续循环，LLM 基于新结果决定下一步
+
+    break  # 没有更多工具调用，获得最终答案
+```
+
+### 🎯 关键点总结
+
+1. **工具执行位置**：`_execute_tool()` 方法执行具体的网络工具
+2. **结果传递机制**：通过 `self.context.append()` 将结果添加到对话历史
+3. **LLM 接收方式**：在下一次 `client.chat.completions.create()` 调用中获得完整上下文
+4. **递归处理**：支持多轮工具调用，每次结果都会影响 LLM 的下一步决策
+
 ## 🔧 进阶开发
 
 ### 添加新工具
